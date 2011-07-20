@@ -4,7 +4,9 @@ postgresql-partitioning adds much needs automatic partition management to Postgr
 
 # Installation
 
-TODO
+Installation is as simple as running the **install.sql**.
+
+    psql -U bob -f "/path/to/install.sql"
 
 # Partitioning Tables
 
@@ -19,25 +21,25 @@ created but the table must have no records.
 
       id SERIAL PRIMARY KEY,
 
-	  some_value INT NOT NULL,
+      some_value INT NOT NULL,
 
-	  message TEXT
+      message TEXT
 
-	);
+    );
 
 2. Partition the table:
 
-	SELECT create_table_partition_by_list('mytable', 'some_value', '{1,2,3}');
+    SELECT create_table_partition_by_list('mytable', 'some_value', '{1,2,3}');
 
 3. INSERT records:
 
-	INSERT INTO mytable (some_value, message) VALUES (2, 'some text');
+    INSERT INTO mytable (some_value, message) VALUES (2, 'some text');
 
-	INSERT 0 0
+    INSERT 0 0
 
-	INSERT INTO mytable (some_value, message) VALUES (5, 'this will fail');
+    INSERT INTO mytable (some_value, message) VALUES (5, 'this will fail');
 
-	ERROR:  List value out of range.
+    ERROR:  List value out of range.
 
 create_table_partition_by_list() takes three arguments;
 
