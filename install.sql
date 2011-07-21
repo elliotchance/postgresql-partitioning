@@ -5,20 +5,53 @@ DECLARE
 	counter INT;
 BEGIN
 	SELECT COUNT(*) INTO counter FROM pg_class WHERE relname = '_partition_table';
-	IF(counter = 0) THEN
-		CREATE TABLE _partition_table (
-			table_name TEXT NOT NULL PRIMARY KEY,
-			partition_type TEXT NOT NULL,
-			expression TEXT NOT NULL
-		);
-		CREATE TABLE _partition (
-			table_name TEXT NOT NULL REFERENCES _partition_table(table_name)
-				ON DELETE CASCADE ON UPDATE CASCADE,
-			partition_name TEXT NOT NULL,
-			test TEXT NOT NULL,
-			PRIMARY KEY ( table_name, partition_name )
-		);
+	IF(counter > 0) THEN
+		RETURN;
 	END IF;
+	
+	-- init
+	CREATE TABLE _partition_table (
+		table_name TEXT NOT NULL PRIMARY KEY,
+		partition_type TEXT NOT NULL,
+		expression TEXT NOT NULL
+	);
+	CREATE TABLE _partition (
+		table_name TEXT NOT NULL REFERENCES _partition_table(table_name)
+			ON DELETE CASCADE ON UPDATE CASCADE,
+		partition_name TEXT NOT NULL,
+		test TEXT NOT NULL,
+		PRIMARY KEY ( table_name, partition_name )
+	);
+END;
+$$ LANGUAGE plpgsql;
+
+
+CREATE OR REPLACE FUNCTION _table_is_partitioned(
+	the_table_name TEXT
+)
+RETURNS BOOLEAN
+AS $$
+DECLARE
+	counter INT;
+BEGIN
+	SELECT COUNT(*) INTO counter FROM _partition_table WHERE table_name=the_table_name;
+	RETURN counter > 0;
+END;
+$$ LANGUAGE plpgsql;
+
+
+CREATE OR REPLACE FUNCTION _partition_exists(
+	the_table_name TEXT,
+	the_partition_name TEXT
+)
+RETURNS BOOLEAN
+AS $$
+DECLARE
+	counter INT;
+BEGIN
+	SELECT COUNT(*) INTO counter FROM _partition WHERE table_name=the_table_name AND
+		partition_name=the_partition_name;
+	RETURN counter > 0;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -42,8 +75,7 @@ BEGIN
 	-- TODO: make sure the table exists
 	
 	-- make sure the table has not been partitioned already
-	SELECT COUNT(*) INTO counter FROM _partition_table WHERE table_name=the_table_name;
-	IF(counter > 0) THEN
+	IF(_table_is_partitioned(the_table_name)) THEN
 		RAISE EXCEPTION 'Table % is already partitioned.', the_table_name;
 	END IF;
 	
@@ -82,7 +114,8 @@ BEGIN
 	END LOOP;
 	
 	-- create trigger
-	the_trigger := the_trigger || 'ELSE RAISE EXCEPTION ''List value out of range.''; END IF; RETURN NULL; END; $TRIGGER$ LANGUAGE plpgsql';
+	the_trigger := the_trigger || 'ELSE RAISE EXCEPTION ''List value out of range.''; END IF;' ||
+		' RETURN NULL; END; $TRIGGER$ LANGUAGE plpgsql';
 	EXECUTE the_trigger;
 	
 	-- attach trigger
@@ -90,6 +123,39 @@ BEGIN
 		' BEFORE INSERT ON ' || the_table_name ||
 		' FOR EACH ROW EXECUTE PROCEDURE ' || the_table_name || '_insert_trigger()';
 	EXECUTE the_trigger;
+	
+	-- success
+	RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql;
+
+
+CREATE OR REPLACE FUNCTION drop_partition(
+	the_table_name TEXT,
+	the_partition_name TEXT
+)
+RETURNS BOOLEAN
+AS $$
+BEGIN
+	-- make sure partitioning feature is ready
+	PERFORM _partition_init();
+	
+	-- make sure the table is partitioned
+	IF(NOT _table_is_partitioned(the_table_name)) THEN
+		RAISE EXCEPTION 'Table % is not partitioned.', the_table_name;
+	END IF;
+	
+	-- make sure the partition exists
+	IF(NOT _partition_exists(the_table_name, the_partition_name)) THEN
+		RAISE EXCEPTION 'Table % does not have the partition %.', the_table_name,
+			the_partition_name;
+	END IF;
+	
+	-- deregister partition
+	DELETE FROM _partition WHERE table_name=the_table_name AND partition_name=the_partition_name;
+	
+	-- drop the partition
+	EXECUTE 'DROP TABLE ' || the_table_name || '_' || the_partition_name;
 	
 	-- success
 	RETURN TRUE;
