@@ -47,6 +47,17 @@ BEGIN
 		INTO counter;
 	PERFORM _partition_assert(1::bigint, counter::bigint);
 	
+	-- add a partition
+	PERFORM add_list_partition('testpart', 'extra', '4');
+	
+	-- insert row into newly created partition
+	INSERT INTO testpart (parter, some_value) VALUES (4, 'qwerty');
+	INSERT INTO testpart (parter, some_value) VALUES (4, 'abcde');
+	
+	-- validate
+	SELECT COUNT(*) INTO counter FROM testpart_extra;
+	PERFORM _partition_assert(2::bigint, counter::bigint);
+	
 	-- drop table
 	PERFORM drop_partitioned_table('testpart');
 	
