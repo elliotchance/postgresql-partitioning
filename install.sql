@@ -22,6 +22,13 @@ BEGIN
 		test TEXT NOT NULL,
 		PRIMARY KEY ( table_name, partition_name )
 	);
+	
+	-- views
+	CREATE VIEW pg_partitions AS
+	SELECT _partition.table_name, _partition.partition_name, _partition_table.partition_type,
+		expression, test
+	FROM _partition, _partition_table
+	WHERE _partition.table_name=_partition_table.table_name;
 END;
 $$ LANGUAGE plpgsql;
 
