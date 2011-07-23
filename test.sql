@@ -1,4 +1,7 @@
-CREATE OR REPLACE FUNCTION _partition_assert(expected BIGINT, received BIGINT)
+CREATE OR REPLACE FUNCTION _partition_assert(
+	expected TEXT,
+	received TEXT
+)
 RETURNS VOID
 AS $$
 BEGIN
@@ -45,7 +48,7 @@ BEGIN
 	EXECUTE 'SELECT COUNT(*) FROM testpart_' ||
 		(SELECT partition_name FROM pg_partition WHERE table_name='testpart' AND test='1')
 		INTO counter;
-	PERFORM _partition_assert(1::bigint, counter::bigint);
+	PERFORM _partition_assert(1::text, counter::text);
 	
 	-- add a partition
 	PERFORM add_list_partition('testpart', 'extra', '4');
@@ -56,7 +59,19 @@ BEGIN
 	
 	-- validate
 	SELECT COUNT(*) INTO counter FROM testpart_extra;
-	PERFORM _partition_assert(2::bigint, counter::bigint);
+	PERFORM _partition_assert(2::text, counter::text);
+	
+	-- move a row to a different partition
+	UPDATE testpart SET parter=1, some_value='works' WHERE some_value='def';
+	
+	-- validate
+	EXECUTE 'SELECT COUNT(*) FROM testpart_' ||
+		(SELECT partition_name FROM pg_partition WHERE table_name='testpart' AND test='1')
+		INTO counter;
+	PERFORM _partition_assert(2::text, counter::text);
+	
+	EXECUTE 'SELECT COUNT(*) FROM testpart WHERE some_value=''works''' INTO counter;
+	PERFORM _partition_assert(1::text, counter::text);
 	
 	-- drop table
 	PERFORM drop_partitioned_table('testpart');
@@ -91,7 +106,7 @@ BEGIN
 	EXECUTE 'SELECT COUNT(*) FROM testpart_' ||
 		(SELECT partition_name FROM pg_partition WHERE table_name='testpart' AND test='c d')
 		INTO counter;
-	PERFORM _partition_assert(1::bigint, counter::bigint);
+	PERFORM _partition_assert(1::text, counter::text);
 	
 	-- drop table
 	PERFORM drop_partitioned_table('testpart');

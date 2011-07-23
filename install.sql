@@ -96,6 +96,7 @@ DECLARE
 	the_trigger TEXT;
 	part_row RECORD;
 	counter INT;
+	the_trigger_name TEXT;
 BEGIN
 	-- build trigger function
 	the_trigger := 'CREATE OR REPLACE FUNCTION ' || the_table_name || '_insert_trigger() ' ||
@@ -113,13 +114,28 @@ BEGIN
 	EXECUTE the_trigger;
 	
 	-- attach trigger
-	SELECT count(*) INTO counter FROM pg_trigger WHERE tgname='insert_' || the_table_name || '_trigger';
+	SELECT count(*) INTO counter FROM pg_trigger
+	WHERE tgname='insert_' || the_table_name || '_trigger';
 	IF(counter = 0) THEN
 		the_trigger := 'CREATE TRIGGER insert_' || the_table_name || '_trigger' ||
-			' BEFORE INSERT ON ' || the_table_name || ' FOR EACH ROW EXECUTE PROCEDURE ' ||
-			the_table_name || '_insert_trigger()';
+			' BEFORE INSERT ON ' || the_table_name ||
+			' FOR EACH ROW EXECUTE PROCEDURE ' || the_table_name || '_insert_trigger()';
 		EXECUTE the_trigger;
 	END IF;
+	
+	-- attach trigger to partitions
+	FOR part_row IN SELECT * FROM pg_partition WHERE table_name=the_table_name
+	LOOP
+		the_trigger_name := the_table_name || '_' || part_row.partition_name;
+		SELECT count(*) INTO counter FROM pg_trigger
+		WHERE tgname='insert_' || the_trigger_name || '_trigger';
+		IF(counter = 0) THEN
+			the_trigger := 'CREATE TRIGGER insert_' || the_trigger_name || '_trigger' ||
+				' BEFORE UPDATE ON ' || the_trigger_name ||
+				' FOR EACH ROW EXECUTE PROCEDURE ' || the_table_name || '_insert_trigger()';
+			EXECUTE the_trigger;
+		END IF;
+	END LOOP;
 	
 	-- success
 	RETURN TRUE;
