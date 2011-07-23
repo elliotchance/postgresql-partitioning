@@ -161,3 +161,35 @@ BEGIN
 	RETURN TRUE;
 END;
 $$ LANGUAGE plpgsql;
+
+
+CREATE OR REPLACE FUNCTION drop_partitioned_table(
+	the_table_name TEXT
+)
+RETURNS BOOLEAN
+AS $$
+DECLARE
+	the_partition_name TEXT;
+BEGIN
+	-- make sure partitioning feature is ready
+	PERFORM _partition_init();
+	
+	-- make sure the table is partitioned
+	IF(NOT _table_is_partitioned(the_table_name)) THEN
+		RAISE EXCEPTION 'Table % is not partitioned.', the_table_name;
+	END IF;
+	
+	-- drop the partitions first
+	FOR the_partition_name IN SELECT partition_name FROM _partition WHERE table_name=the_table_name
+	LOOP
+		PERFORM drop_partition(the_table_name, the_partition_name);
+	END LOOP;
+	
+	-- drop the partition
+	DELETE FROM _partition_table WHERE table_name=the_table_name;
+	EXECUTE 'DROP TABLE ' || the_table_name;
+	
+	-- success
+	RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql;
