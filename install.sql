@@ -24,7 +24,7 @@ BEGIN
 	);
 	
 	-- views
-	CREATE VIEW pg_partitions AS
+	CREATE VIEW pg_partition AS
 	SELECT _partition.table_name, _partition.partition_name, _partition_table.partition_type,
 		expression, test
 	FROM _partition, _partition_table
@@ -200,3 +200,49 @@ BEGIN
 	RETURN TRUE;
 END;
 $$ LANGUAGE plpgsql;
+
+
+CREATE OR REPLACE FUNCTION describe_partitioned_table(
+	the_table_name TEXT
+)
+RETURNS TEXT
+AS $$
+DECLARE
+	des TEXT;
+	part RECORD;
+BEGIN
+	-- make sure partitioning feature is ready
+	PERFORM _partition_init();
+	
+	-- build table overview description
+	des := '  Table: ' || the_table_name || E'\n';
+	des := des || '   Type: ' ||
+		(SELECT upper(partition_type) FROM _partition_table WHERE table_name=the_table_name) ||
+		E'\n';
+	des := des || '  Count: ' ||
+		(SELECT count(*) FROM _partition WHERE table_name=the_table_name) ||
+		E'\n';
+	des := des || E'\n';
+	
+	-- build indervidual table descriptions
+	des := des || E' Partition Name | Approx Rows | Expression\n';
+	des := des || E'----------------+-------------+------------\n';
+	FOR part IN
+		SELECT pg_partition.*, reltuples
+		FROM pg_partition, pg_class
+		WHERE table_name=the_table_name AND relname=the_table_name
+	LOOP
+		des := des || ' ' || part.partition_name ||
+			substring('              ' for 14 - length(part.partition_name));
+		des := des || ' | ';
+		des := des || substring('           ' for 11 - length(part.reltuples::text)) ||
+			part.reltuples;
+		des := des || ' | ';
+		des := des || part.expression || '=' || part.test;
+		des := des || E'\n';
+	END LOOP;
+	
+	RETURN des;
+END;
+$$ LANGUAGE plpgsql;
+select describe_partitioned_table('mypart');
