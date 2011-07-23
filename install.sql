@@ -103,21 +103,21 @@ BEGIN
 	FOR the_list_value IN
 		SELECT the_list_values[i] FROM generate_series(1, array_upper(the_list_values, 1)) AS i
 	LOOP
-		the_partition_name := 'part_' || the_list_value;
+		the_partition_name := 'part_' || substring(md5(random()::text) for 8);
 		
 		-- register partition
 		INSERT INTO _partition (table_name, partition_name, test)
 		VALUES (the_table_name, the_partition_name, the_list_value);
 		
 		-- append trigger
-		the_trigger := the_trigger || ' ELSIF (NEW.' || the_expression || ' = ' ||
-			the_list_value || ') THEN INSERT INTO ' || the_table_name || '_' ||
+		the_trigger := the_trigger || ' ELSIF (NEW.' || the_expression || '::text = ''' ||
+			the_list_value || '''::text) THEN INSERT INTO ' || the_table_name || '_' ||
 			the_partition_name || ' VALUES (NEW.*); ';
 	
 		-- create partition tables
 		EXECUTE 'CREATE TABLE ' || the_table_name || '_' || the_partition_name || '( CHECK((' ||
-			the_expression || ') = (' || the_list_value || ')) ) INHERITS (' || the_table_name ||
-			')';
+			the_expression || ')::text = (''' || the_list_value || ''')::text) ) INHERITS (' ||
+			the_table_name || ')';
 	END LOOP;
 	
 	-- create trigger
@@ -245,4 +245,3 @@ BEGIN
 	RETURN des;
 END;
 $$ LANGUAGE plpgsql;
-select describe_partitioned_table('mypart');
