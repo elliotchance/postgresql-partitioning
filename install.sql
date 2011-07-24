@@ -138,7 +138,7 @@ BEGIN
 	
 	the_trigger := the_trigger || 'ELSE RAISE EXCEPTION ''Value provided for ' ||
 		(SELECT partition_type FROM _partition_table WHERE table_name=the_table_name) ||
-		' partition out of range.''; END IF;' ||
+		' partition is out of range.''; END IF;' ||
 		' RETURN NULL; END; $TRIGGER$ LANGUAGE plpgsql';
 	EXECUTE the_trigger;
 	
@@ -514,6 +514,34 @@ BEGIN
 	-- rebuild triggers
 	PERFORM _rebuild_triggers(the_table_name);
 	
+	-- success
+	RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql;
+
+
+CREATE OR REPLACE FUNCTION detach_partition(
+	the_table_name TEXT,
+	the_partition_name TEXT,
+	destination_name TEXT
+)
+RETURNS BOOLEAN
+AS $$
+BEGIN
+	-- make sure the destination table does not exist
+	IF(_table_exists(destination_name)) THEN
+		RAISE EXCEPTION 'Destination table % already exists.', destination_name;
+	END IF;
+	
+	-- deregister partition
+	DELETE FROM _partition WHERE table_name=the_table_name AND partition_name=the_partition_name;
+	
+	-- detach the table
+	EXECUTE 'ALTER TABLE ' || the_table_name || '_' || the_partition_name || ' NO INHERIT ' ||
+		the_table_name;
+	EXECUTE 'ALTER TABLE ' || the_table_name || '_' || the_partition_name || ' RENAME TO ' ||
+		destination_name;
+		
 	-- success
 	RETURN TRUE;
 END;
