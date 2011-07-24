@@ -150,7 +150,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 
-CREATE OR REPLACE FUNCTION _partition_test_range1()
+CREATE OR REPLACE FUNCTION _partition_test_range()
 RETURNS BOOLEAN
 AS $$
 DECLARE
@@ -170,7 +170,7 @@ BEGIN
 	-- insert rows
 	INSERT INTO testpart (parter, some_value) VALUES (2, 'abc');
 	INSERT INTO testpart (parter, some_value) VALUES (5, 'def');
-	INSERT INTO testpart (parter, some_value) VALUES (6, 'xyz');
+	INSERT INTO testpart (parter, some_value) VALUES (4, 'xyz');
 	
 	-- validate
 	SELECT COUNT(*) INTO counter FROM testpart_range2;

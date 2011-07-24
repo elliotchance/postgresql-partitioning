@@ -64,6 +64,52 @@ END;
 $$ LANGUAGE plpgsql;
 
 
+
+CREATE OR REPLACE FUNCTION _sprintf(fmt text, variadic args anyarray)
+RETURNS TEXT
+AS $$
+	DECLARE
+		argcnt  int = 1;
+		chrcnt  int = 0;
+		fmtlen  int;
+		CHR             text;
+		output  text = '';
+	BEGIN
+		fmtlen = LENGTH(fmt);
+		LOOP
+			chrcnt = chrcnt + 1;
+
+			-- ran out of format string? bail out
+			IF chrcnt > fmtlen THEN
+				EXIT;
+			END IF;
+
+			-- grab our char
+			CHR = substring(fmt, chrcnt, 1);
+
+			-- %% means output a single %, and skip them
+			IF CHR = '%' AND substring(fmt, chrcnt + 1, 1) = '%' THEN
+				output = output || '%';
+				chrcnt = chrcnt + 1;
+				continue;
+			END IF;
+
+			-- a % on its own means output an element from our arg list
+			IF CHR = '%' THEN
+				output = output || COALESCE(args[argcnt]::text, '');
+				argcnt = argcnt + 1;
+				continue;
+			END IF;
+
+			-- no special case? output the thing
+			output = output || CHR;
+		END LOOP;
+
+		RETURN output;
+	END;
+$$ LANGUAGE plpgsql;
+
+
 CREATE OR REPLACE FUNCTION _add_partition(
 	the_table_name TEXT,
 	the_partition_name TEXT,
@@ -85,10 +131,11 @@ BEGIN
 			the_expression || ')::' || compare_type || ' = (''' || the_min_value || ''')::' ||
 			compare_type || ') ) INHERITS (' || the_table_name || ')';
 	ELSE
-		EXECUTE 'CREATE TABLE ' || the_table_name || '_' || the_partition_name || '( CHECK((' ||
-			the_expression || ')::' || compare_type || ' BETWEEN (''' || the_min_value || ''')::' ||
-			compare_type || ' AND (''' || the_max_value || ''')::' || compare_type ||
-			') ) INHERITS (' || the_table_name || ')';
+		EXECUTE 'CREATE TABLE ' || the_table_name || '_' || the_partition_name || '( CHECK(' ||
+			'((''' || the_min_value || ''')::' || compare_type || ' >= (' || the_expression ||
+			')::' || compare_type || ') AND ((' || the_expression || ')::' || compare_type ||
+			' < (''' || the_max_value || ''')::' || compare_type || ') ) ' ||
+			'INHERITS (' || the_table_name || ')';
 	END IF;
 		
 	-- register partition
@@ -123,17 +170,17 @@ BEGIN
 	FOR part_row IN SELECT * FROM pg_partition WHERE table_name=the_table_name
 	LOOP
 		IF(part_row.test_upper IS NULL) THEN
-			the_trigger := the_trigger || ' ELSIF (NEW.' || part_row.expression || '::' ||
-				compare_type || ' = ''' || part_row.test_lower || '''::' || compare_type ||
-				') THEN INSERT INTO ' || the_table_name || '_' || part_row.partition_name ||
-				' VALUES (NEW.*); ';
+			the_trigger := the_trigger || _sprintf(' ELSIF (NEW.%::% = ''%''::%) THEN',
+				part_row.expression, compare_type, part_row.test_lower, compare_type);
 		ELSE
-			the_trigger := the_trigger || ' ELSIF (NEW.' || part_row.expression || '::' ||
-				compare_type || ' BETWEEN ''' || part_row.test_lower || '''::' || compare_type ||
-				' AND ''' || part_row.test_upper || '''::' || compare_type ||
-				') THEN INSERT INTO ' || the_table_name || '_' || part_row.partition_name ||
-				' VALUES (NEW.*); ';
+			the_trigger := the_trigger ||
+				_sprintf(' ELSIF ( (NEW.%::% >= ''%''::%) AND (NEW.%::% < ''%''::%) ) THEN',
+				part_row.expression, compare_type, part_row.test_lower, compare_type,
+				part_row.expression, compare_type, part_row.test_upper, compare_type);
 		END IF;
+		
+		the_trigger := the_trigger || _sprintf(' INSERT INTO %_% VALUES (NEW.*);',
+			the_table_name, part_row.partition_name);
 	END LOOP;
 	
 	the_trigger := the_trigger || 'ELSE RAISE EXCEPTION ''Value provided for ' ||
@@ -159,9 +206,9 @@ BEGIN
 		SELECT count(*) INTO counter FROM pg_trigger
 		WHERE tgname='insert_' || the_trigger_name || '_trigger';
 		IF(counter = 0) THEN
-			the_trigger := 'CREATE TRIGGER insert_' || the_trigger_name || '_trigger' ||
-				' BEFORE UPDATE ON ' || the_trigger_name ||
-				' FOR EACH ROW EXECUTE PROCEDURE ' || the_table_name || '_insert_trigger()';
+			the_trigger := _sprintf('CREATE TRIGGER insert_%_trigger BEFORE UPDATE ON % ',
+				the_trigger_name, the_trigger_name) ||
+				_sprintf('FOR EACH ROW EXECUTE PROCEDURE %_insert_trigger()', the_table_name);
 			EXECUTE the_trigger;
 		END IF;
 	END LOOP;
@@ -496,11 +543,12 @@ BEGIN
 	END IF;
 	
 	-- make sure this range value does not conflict exist
-	EXECUTE 'SELECT * FROM _partition WHERE table_name=''' || the_table_name || ''' AND ' ||
-		'((''' || the_range_min || '''::' || compare_type || ' BETWEEN test_lower::' ||
-		compare_type || ' AND test_upper::' || compare_type || ') OR ' || '(''' || the_range_max ||
-		'''::' || compare_type || ' BETWEEN test_lower::' || compare_type || ' AND test_upper::' ||
-		compare_type || ')) LIMIT 1' INTO temp_row;
+	EXECUTE _sprintf('SELECT * FROM _partition WHERE table_name=''%'' AND (' ||
+		'(''%''::% >= test_lower::% AND ''%''::% < test_upper::%) OR ' ||
+		'(''%''::% >= test_lower::% AND ''%''::% < test_upper::%)) LIMIT 1',
+		the_table_name,
+		the_range_min, compare_type, compare_type, the_range_min, compare_type, compare_type,
+		the_range_max, compare_type, compare_type, the_range_max, compare_type, compare_type) INTO temp_row;
 	IF(temp_row IS NOT NULL) THEN
 		RAISE EXCEPTION 'Range conflicts with an already defined range %-%.', temp_row.test_lower,
 			temp_row.test_upper;
